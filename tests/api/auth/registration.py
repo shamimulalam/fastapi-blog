@@ -1,6 +1,5 @@
 from http import HTTPStatus
 
-from sqlalchemy.sql.functions import user
 from sqlmodel import select
 from app.models.user import User
 from app.utils.security import verify_password, hash_password

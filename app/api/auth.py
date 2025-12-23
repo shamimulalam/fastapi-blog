@@ -1,13 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from http import HTTPStatus
+from datetime import timedelta
 
 from sqlmodel import Session, select
 
+from app.schemas.auth.login import Login
 from app.schemas.auth.registration import Registration
 from app.models.user import User
 from app.database import get_session
-from app.utils.security import hash_password
-
+from app.utils.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    ACCESS_TOKEN_EXPIRE_MINUTES
+)
 router = APIRouter()
 
 
@@ -80,3 +86,65 @@ async def user_registration(
             "status": new_user.status
         }
     }
+
+@router.post("/login", tags=["Authentication"], status_code=HTTPStatus.OK)
+async def user_login(
+    payload: Login = Body(
+            ...,
+            openapi_examples={
+                "normal": {
+                    "summary": "First User Login",
+                    "description": "A typical user registration",
+                    "value": {
+                        "email": "john.doe@example.com",
+                        "password": "SecurePass123!"
+                    }
+                },
+                "another_user": {
+                    "summary": "Second User Login",
+                    "description": "Registrated with different data",
+                    "value": {
+                        "email": "jane.smith@company.com",
+                        "password": "MyP@ssw0rd123"
+                    }
+                }
+            }
+        ),
+    session: Session = Depends(get_session)
+):
+    user = session.exec(select(User).where(User.email == payload.email)).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid Email or Password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not verify_password(payload.password, user.password):
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid Email or Password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if user.status != 1:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Inactive user account",
+        )
+
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": str(user.id), "email": user.email},
+        expires_delta=access_token_expires
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+
+
+
